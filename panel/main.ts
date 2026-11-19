@@ -682,11 +682,10 @@ function repoRow(r: RepoStatus): HTMLElement {
 }
 
 function viewRepos(): HTMLElement {
-  const shown = (S.onlyDirty ? S.repos.filter((r) => dirtyCount(r) > 0) : S.repos)
-    .slice()
-    .sort((a, b) => dirtyCount(b) - dirtyCount(a) || a.name.localeCompare(b.name));
+  // Ordine del worker (= sidebar di Orca).
+  const shown = S.onlyDirty ? S.repos.filter((r) => dirtyCount(r) > 0) : S.repos;
   if (shown.length === 0) return h('div', { class: 'muted' }, t('noRepos'));
-  return h('div', { class: 'list' }, ...shown.map(repoRow));
+  return h('div', { class: 'list repos' }, ...shown.map(repoRow));
 }
 
 /** Barra di riepilogo del gruppo: quanti repo, quanti da guardare. */
@@ -1520,6 +1519,7 @@ hr { width:100%; border:0; border-top:1px solid var(--line); margin:2px 0 }
 .item { padding:4px 8px; cursor:pointer } .item:hover { background:var(--hover) }
 .item.cur { background:var(--sel) }
 .list > .item { margin:0 -14px; padding:4px 14px }
+.list.repos { margin:0 -14px; max-height:calc(5 * 48px); overflow-y:auto } .list.repos > .item { margin:0 }
 .title { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .desc { font-size:11.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .repo { padding-top:6px; padding-bottom:6px } .repo .desc { margin-top:2px; gap:6px }

@@ -618,6 +618,29 @@ export default function activate(orca: OrcaWorkerApi): void {
     return {};
   });
 
+  /**
+   * Ordine della sidebar di Orca: `manualOrder` decrescente dei worktree (via CLI).
+   * Mappa vuota se la CLI non c'è o fallisce (si ricade sull'ordine alfabetico).
+   */
+  async function sidebarOrder(): Promise<Map<string, number>> {
+    const bin = await orcaBin();
+    if (!bin) return new Map();
+    try {
+      const { stdout } = await run(bin, ['worktree', 'list', '--json'], { timeout: 10_000 });
+      const all = (JSON.parse(stdout).result?.worktrees ?? []) as {
+        path?: string;
+        manualOrder?: number;
+      }[];
+      return new Map(
+        all
+          .filter((w) => w.path && typeof w.manualOrder === 'number')
+          .map((w) => [w.path as string, w.manualOrder as number]),
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
   async function scanRepos(): Promise<{
     root: string;
     source: string;
@@ -627,11 +650,13 @@ export default function activate(orca: OrcaWorkerApi): void {
     const names = await repoNames(root);
     known.clear();
     for (const n of names) known.add(join(root, n));
-    return {
-      root,
-      source,
-      repos: await Promise.all(names.map((n) => repoStatus(root, n))),
-    };
+    const [repos, order] = await Promise.all([
+      Promise.all(names.map((n) => repoStatus(root, n))),
+      sidebarOrder(),
+    ]);
+    const rank = (r: RepoStatus) => order.get(r.path) ?? -Infinity;
+    repos.sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
+    return { root, source, repos };
   }
 
   /** Voce della status bar: contatori del gruppo di repo. Mai fatale: il pannello funziona anche senza. */
