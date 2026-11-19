@@ -142,7 +142,8 @@ export function parseStatus(
 
 async function repoStatus(root: string, name: string): Promise<RepoStatus> {
   const path = join(root, name);
-  name = name.split('/')[0]; // repo annidato: si mostra la cartella padre (nome del repo)
+  // repo annidato: si mostra la cartella padre (nome del repo); progetto singolo (`''`): la sua cartella
+  name = name.split('/')[0] || basename(path);
   try {
     const [st, stash, log] = await Promise.all([
       git(path, ['status', '--porcelain=v2', '--branch']),
@@ -260,19 +261,25 @@ async function pickActive(orca: OrcaWorkerApi): Promise<WsPick<Ws>> {
 }
 
 /** Cartella da scansionare: figli-repo del workspace attivo, altrimenti il setting rootDir. */
+/** Repo da mostrare (relativi a `root`): `root` stesso per un progetto singolo, o i repo della cartella. */
+async function rootRepos(r: { root: string; single?: boolean }): Promise<string[]> {
+  return r.single ? [''] : repoNames(r.root);
+}
+
 async function resolveRoot(
   orca: OrcaWorkerApi,
-): Promise<{ root: string; source: string }> {
+): Promise<{ root: string; source: string; single?: boolean }> {
   const fallback = String((await orca.settings.get('rootDir')) ?? '');
   try {
     const pick = await pickActive(orca);
     if (pick.kind === 'ambiguous') return { root: fallback, source: 'ambiguous' };
     const ws = pick.kind === 'found' ? pick.ws : undefined;
     if (ws) {
+      // Progetto singolo: solo il suo repo. Gruppo di cartelle: i repo figli.
+      if (await isRepo(ws.path))
+        return { root: ws.path, source: `workspace:${ws.name}`, single: true };
       if ((await repoNames(ws.path)).length > 0)
         return { root: ws.path, source: `workspace:${ws.name}` };
-      if (await isRepo(ws.path))
-        return { root: join(ws.path, '..'), source: `parent:${ws.name}` };
     }
   } catch {
     // niente contesto: si usa il setting
@@ -616,9 +623,9 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (typeof path !== 'string' || !isAbsolute(path))
       throw new Error('invalid repository');
     if (!known.has(path)) {
-      const { root } = await resolveRoot(orca);
+      const r = await resolveRoot(orca);
       known.clear();
-      for (const n of await repoNames(root)) known.add(join(root, n));
+      for (const n of await rootRepos(r)) known.add(join(r.root, n));
     }
     if (!known.has(path)) throw new Error('invalid repository');
     return path;
@@ -685,8 +692,9 @@ export default function activate(orca: OrcaWorkerApi): void {
     source: string;
     repos: RepoStatus[];
   }> {
-    const { root, source } = await resolveRoot(orca);
-    const names = await repoNames(root);
+    const r = await resolveRoot(orca);
+    const { root, source } = r;
+    const names = await rootRepos(r);
     known.clear();
     for (const n of names) known.add(join(root, n));
     const [repos, order] = await Promise.all([

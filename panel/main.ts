@@ -126,7 +126,7 @@ const openFailure = (reason: string | undefined, path: string): string =>
         ? t('reasonNoWorkspace', { path })
         : t('diffNotOpened');
 
-/** `source` di repos.list: `workspace:NOME`, `parent:NOME` (workspace = singolo repo) oppure `setting`. */
+/** `source` di repos.list: `workspace:NOME`, `parent:NOME` (versioni precedenti) oppure `setting`. */
 const sourceLabel = (s: string): string =>
   s.startsWith('workspace:')
     ? t('sourceWorkspace', { name: s.slice(10) })
