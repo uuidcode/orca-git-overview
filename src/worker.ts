@@ -238,9 +238,10 @@ async function terminalPaths(terminals: { id: string }[]): Promise<string[]> {
   }
 }
 
-/** Riconosce il workspace attivo (nome + branch, poi terminali per gli omonimi). */
+/** Riconosce il workspace attivo (id, altrimenti nome + branch, poi terminali per gli omonimi). */
 async function pickActive(orca: OrcaWorkerApi): Promise<WsPick<Ws>> {
   const ctx = (await orca.host.call('workspace.readContext', {})) as {
+    workspaceId?: string;
     displayName: string;
     branch: string;
     terminals: { id: string }[];
@@ -249,6 +250,9 @@ async function pickActive(orca: OrcaWorkerApi): Promise<WsPick<Ws>> {
     workspaces: Ws[];
   };
   if (!ctx) return { kind: 'none' };
+  // Host API 1.7+: l'id identifica il workspace anche tra omonimi (es. più `dev` su `dev`).
+  const byId = ctx.workspaceId && workspaces.find((w) => w.id === ctx.workspaceId);
+  if (byId) return { kind: 'found', ws: byId };
   const pick = pickWorkspace(workspaces, ctx, []);
   return pick.kind === 'ambiguous'
     ? pickWorkspace(workspaces, ctx, await terminalPaths(ctx.terminals))
