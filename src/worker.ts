@@ -11,7 +11,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { basename, delimiter, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { OrcaWorkerApi } from 'orca/worker';
 import type { DiffPayload } from '../shared/diff';
@@ -141,6 +141,7 @@ export function parseStatus(
 
 async function repoStatus(root: string, name: string): Promise<RepoStatus> {
   const path = join(root, name);
+  name = name.split('/')[0]; // repo annidato: si mostra la cartella padre (nome del repo)
   try {
     const [st, stash, log] = await Promise.all([
       git(path, ['status', '--porcelain=v2', '--branch']),
@@ -191,8 +192,17 @@ async function repoNames(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const names: string[] = [];
   for (const e of entries) {
-    if (e.isDirectory() && !e.name.startsWith('.') && (await isRepo(join(root, e.name))))
+    if (!e.isDirectory() || e.name.startsWith('.')) continue;
+    if (await isRepo(join(root, e.name))) {
       names.push(e.name);
+      continue;
+    }
+    // Un livello più giù: worktree collegati da Orca (`<repo>/<worktree>`, `.git` è un file).
+    const sub = await readdir(join(root, e.name), { withFileTypes: true }).catch(() => []);
+    for (const c of sub) {
+      if (c.isDirectory() && !c.name.startsWith('.') && (await isRepo(join(root, e.name, c.name))))
+        names.push(`${e.name}/${c.name}`);
+    }
   }
   return names.sort();
 }
@@ -750,12 +760,13 @@ export default function activate(orca: OrcaWorkerApi): void {
   const PREVIEW_DIR = '.orca-overview';
   const MAX_PREVIEWS = 20;
 
-  /** Aggiunge `pattern` a `.git/info/exclude` (solo locale, mai versionato) se manca. */
-  async function excludeFromGit(gitDir: string, pattern: string): Promise<void> {
-    const file = join(gitDir, 'info', 'exclude');
+  /** Aggiunge `pattern` a `info/exclude` (solo locale, mai versionato) se manca. Vale anche per i worktree collegati. */
+  async function excludeFromGit(repo: string, pattern: string): Promise<void> {
+    const rel = (await git(repo, ['rev-parse', '--git-path', 'info/exclude'])).trim();
+    const file = isAbsolute(rel) ? rel : join(repo, rel);
     const current = await readFile(file, 'utf8').catch(() => '');
     if (current.split('\n').includes(pattern)) return;
-    await mkdir(join(gitDir, 'info'), { recursive: true });
+    await mkdir(dirname(file), { recursive: true });
     await appendFile(
       file,
       `${current && !current.endsWith('\n') ? '\n' : ''}${pattern}\n`,
@@ -780,13 +791,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     m: WsMatch,
     payload: Omit<DiffPayload, 'lang'>,
   ): Promise<{ opened: boolean; reason?: OpenFailure }> {
-    const gitDir = join(path, '.git');
-    if (!(await stat(gitDir)).isDirectory())
-      return { opened: false, reason: 'git-not-dir' };
     // Fuori da `.git`: il watcher di Orca ignora quella cartella, quindi un tab già aperto
     // non vedrebbe le riscritture. La cartella è esclusa da git via `.git/info/exclude`.
     const dir = join(path, PREVIEW_DIR);
-    await excludeFromGit(gitDir, `/${PREVIEW_DIR}/`);
+    await excludeFromGit(path, `/${PREVIEW_DIR}/`);
     // Repo non fidato: `.orca-overview` versionata come symlink punterebbe fuori dal repo.
     const dirStat = await lstat(dir).catch(() => null);
     if (dirStat && (dirStat.isSymbolicLink() || !dirStat.isDirectory()))
