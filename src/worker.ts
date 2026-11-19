@@ -12,6 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { OrcaWorkerApi } from 'orca/worker';
 import type { DiffPayload } from '../shared/diff';
@@ -221,6 +222,7 @@ async function terminalPaths(terminals: { id: string }[]): Promise<string[]> {
   if (!bin) return [];
   try {
     const { stdout } = await run(bin, ['terminal', 'list', '--json'], {
+      env: orcaEnv(),
       timeout: 10_000,
     });
     const all = (JSON.parse(stdout).result?.terminals ?? []) as {
@@ -378,6 +380,27 @@ const ORCA_DIRS = [
   '/Applications/Orca.app/Contents/Resources/bin',
 ];
 
+/**
+ * Cartella dati dell'Orca che esegue il plugin: un plugin installato sta in `<userData>/plugins/<id>/…`.
+ * Senza, la CLI cerca il runtime nella cartella predefinita e fallisce con build diverse (es. `orca-dev`).
+ */
+function orcaUserData(): string | null {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let up = dirname(dir); up !== dir; dir = up, up = dirname(dir))
+      if (basename(up) === 'plugins') return dirname(up);
+  } catch {
+    // modulo senza `import.meta.url`
+  }
+  return null;
+}
+
+/** Ambiente per lanciare la CLI `orca` verso questo Orca. */
+function orcaEnv(): NodeJS.ProcessEnv {
+  const data = process.env.ORCA_USER_DATA_PATH ? null : orcaUserData();
+  return data ? { ...process.env, ORCA_USER_DATA_PATH: data } : process.env;
+}
+
 /** CLI `orca`: prima le cartelle del PATH, poi quelle di installazione note. Null se non si trova. */
 async function orcaBin(): Promise<string | null> {
   const dirs = [
@@ -417,7 +440,7 @@ async function nativeDiff(
   ];
   if (group === 'staged') args.push('--staged');
   try {
-    const { stdout } = await run(bin, args, { timeout: 15_000 });
+    const { stdout } = await run(bin, args, { timeout: 15_000, env: orcaEnv() });
     return JSON.parse(stdout).result?.opened === true ? 'ok' : null;
   } catch {
     return null;
@@ -638,7 +661,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   }
 
   async function readOrder(bin: string): Promise<Map<string, number>> {
-    const { stdout } = await run(bin, ['worktree', 'list', '--json'], { timeout: 10_000 });
+    const { stdout } = await run(bin, ['worktree', 'list', '--json'], {
+      timeout: 10_000,
+      env: orcaEnv(),
+    });
     const all = (JSON.parse(stdout).result?.worktrees ?? []) as {
       path?: string;
       manualOrder?: number;
