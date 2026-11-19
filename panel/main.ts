@@ -970,6 +970,7 @@ function viewGraph(repo: RepoStatus): HTMLElement {
               void loadGraph(repo.path, G.limit, (e.target as HTMLSelectElement).value),
           },
           h('option', { value: '', selected: !G.branch }, t('allBranches')),
+          h('option', { value: 'HEAD', selected: G.branch === 'HEAD' }, 'HEAD'),
           ...locals.map((b) =>
             h('option', { value: b.name, selected: G.branch === b.name }, b.name),
           ),
@@ -995,7 +996,7 @@ function viewGraph(repo: RepoStatus): HTMLElement {
   if (G.note && !G.sel) root.append(h('div', { class: 'note warn' }, G.note));
 
   // Righe: opzionale "modifiche non committate" in testa, poi i commit.
-  const dirty = dirtyCount(repo) > 0 && !G.branch && G.head !== null;
+  const dirty = dirtyCount(repo) > 0 && (!G.branch || G.branch === 'HEAD') && G.head !== null;
   const rows: { hash: string; parents: string[]; uncommitted?: boolean }[] =
     G.commits.map((c) => ({ hash: c.hash, parents: c.parents }));
   if (dirty) rows.unshift({ hash: UNCOMMITTED, parents: [G.head!], uncommitted: true });
