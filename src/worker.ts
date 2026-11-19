@@ -623,22 +623,31 @@ export default function activate(orca: OrcaWorkerApi): void {
    * Mappa vuota se la CLI non c'è o fallisce (si ricade sull'ordine alfabetico).
    */
   async function sidebarOrder(): Promise<Map<string, number>> {
-    const bin = await orcaBin();
-    if (!bin) return new Map();
-    try {
-      const { stdout } = await run(bin, ['worktree', 'list', '--json'], { timeout: 10_000 });
-      const all = (JSON.parse(stdout).result?.worktrees ?? []) as {
-        path?: string;
-        manualOrder?: number;
-      }[];
-      return new Map(
-        all
-          .filter((w) => w.path && typeof w.manualOrder === 'number')
-          .map((w) => [w.path as string, w.manualOrder as number]),
-      );
-    } catch {
-      return new Map();
+    // Il primo `orca` del PATH può essere una build di sviluppo rotta: si provano anche quelli installati.
+    const bins = [await orcaBin(), ...ORCA_DIRS.map((d) => join(d, 'orca'))].filter(
+      (b, i, a): b is string => !!b && a.indexOf(b) === i,
+    );
+    for (const bin of bins) {
+      try {
+        return await readOrder(bin);
+      } catch {
+        /* prossimo */
+      }
     }
+    return new Map();
+  }
+
+  async function readOrder(bin: string): Promise<Map<string, number>> {
+    const { stdout } = await run(bin, ['worktree', 'list', '--json'], { timeout: 10_000 });
+    const all = (JSON.parse(stdout).result?.worktrees ?? []) as {
+      path?: string;
+      manualOrder?: number;
+    }[];
+    return new Map(
+      all
+        .filter((w) => w.path && typeof w.manualOrder === 'number')
+        .map((w) => [w.path as string, w.manualOrder as number]),
+    );
   }
 
   async function scanRepos(): Promise<{
